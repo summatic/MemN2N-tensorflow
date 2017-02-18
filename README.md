@@ -125,3 +125,8 @@ Author
 ------
 
 Taehoon Kim / [@carpedm20](http://carpedm20.github.io/)
+
+Comment by HS
+-------------
+
+이 코드는 논문의 여러 내용 중 end-to-end memory 개념을 이용한 language modeling 내용을 담고 있습니다. 논문의 5. Language Modeling Experiment를 참고하시면 됩니다
