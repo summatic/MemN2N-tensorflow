@@ -27,6 +27,7 @@ flags.DEFINE_boolean("show", False, "print progress [False]")
 
 FLAGS = flags.FLAGS
 
+
 def main(_):
     count = []
     word2idx = {}
