@@ -3,7 +3,7 @@ import math
 import random
 import numpy as np
 import tensorflow as tf
-from past.builtins import xrange
+
 
 class MemN2N(object):
     def __init__(self, config, sess):
@@ -66,14 +66,16 @@ class MemN2N(object):
         Bin_t = tf.nn.embedding_lookup(self.T_B, self.time)
         Bin = tf.add(Bin_c, Bin_t)  # Bin dim: [batch_size, mem_size, edim]
 
-        for h in xrange(self.nhop):
+        for h in range(self.nhop):
             self.hid3dim = tf.reshape(self.hid[-1], [-1, 1, self.edim])  # dim: [batch_size, 1, edim]
-            Aout = tf.batch_matmul(self.hid3dim, Ain, adj_y=True)  # dim: [batch_size, 1, mem_size]
+            Aout = tf.matmul(self.hid3dim, Ain, adjoint_b=True)
+            # Aout = tf.batch_matmul(self.hid3dim, Ain, adj_y=True)  # dim: [batch_size, 1, mem_size]
             Aout2dim = tf.reshape(Aout, [-1, self.mem_size])  # dim: [batch_size, mem_size]
-            P = tf.nn.softmax(Aout2dim) # dim: [batch_size, mem_size]
+            P = tf.nn.softmax(Aout2dim)  # dim: [batch_size, mem_size]
 
             probs3dim = tf.reshape(P, [-1, 1, self.mem_size])  # dim: [batch_size, 1, mem_size]
-            Bout = tf.batch_matmul(probs3dim, Bin)  # dim: [batch_size, 1, edim]
+            Bout = tf.matmul(probs3dim, Bin)
+            # Bout = tf.batch_matmul(probs3dim, Bin)  # dim: [batch_size, 1, edim]
             Bout2dim = tf.reshape(Bout, [-1, self.edim])  # dim: [batch_size, edim]
 
             Cout = tf.matmul(self.hid[-1], self.C)  # dim: [batch_size, edim]
@@ -89,7 +91,7 @@ class MemN2N(object):
                 F = tf.slice(Dout, [0, 0], [self.batch_size, self.lindim])
                 G = tf.slice(Dout, [0, self.lindim], [self.batch_size, self.edim-self.lindim])
                 K = tf.nn.relu(G)
-                self.hid.append(tf.concat(1, [F, K]))
+                self.hid.append(tf.concat([F, K], 1))
 
     def build_model(self):
         self.build_memory()
@@ -97,18 +99,18 @@ class MemN2N(object):
         self.W = tf.Variable(tf.random_normal([self.edim, self.nwords], stddev=self.init_std))
         z = tf.matmul(self.hid[-1], self.W)  # dim: [nwords]
 
-        self.loss = tf.nn.softmax_cross_entropy_with_logits(z, self.target)
+        self.loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=z)
+        # self.loss = tf.nn.softmax_cross_entropy_with_logits(z, self.target)
 
         self.lr = tf.Variable(self.current_lr)
         self.opt = tf.train.GradientDescentOptimizer(self.lr)
 
         params = [self.A, self.B, self.C, self.T_A, self.T_B, self.W]
-        grads_and_vars = self.opt.compute_gradients(self.loss,params)
-        clipped_grads_and_vars = [(tf.clip_by_norm(gv[0], self.max_grad_norm), gv[1]) \
-                                   for gv in grads_and_vars]  # gradient clipping
+        grads_and_vars = self.opt.compute_gradients(self.loss, params)
+        clipped_grads_and_vars = [(tf.clip_by_norm(gv[0], self.max_grad_norm), gv[1]) for gv in grads_and_vars]  # gradient clipping
 
         inc = self.global_step.assign_add(1)
-        with tf.control_dependencies([inc]):
+        with tf.control_dependencies([inc]):  # multi_gpu issue
             self.optim = self.opt.apply_gradients(clipped_grads_and_vars)
 
         tf.global_variables_initializer().run()
@@ -124,17 +126,18 @@ class MemN2N(object):
         context = np.ndarray([self.batch_size, self.mem_size])
 
         x.fill(self.init_hid)
-        for t in xrange(self.mem_size):
-            time[:,t].fill(t)
+        for t in range(self.mem_size):
+            time[:, t].fill(t)
 
         if self.show:
             from utils import ProgressBar
             bar = ProgressBar('Train', max=N)
 
-        for idx in xrange(N):
-            if self.show: bar.next()
+        for idx in range(N):
+            if self.show:
+                bar.next()
             target.fill(0)
-            for b in xrange(self.batch_size):
+            for b in range(self.batch_size):
                 m = random.randrange(self.mem_size, len(data))
                 target[b][data[m]] = 1
                 context[b] = data[m - self.mem_size:m]
@@ -142,14 +145,15 @@ class MemN2N(object):
             _, loss, self.step = self.sess.run([self.optim,
                                                 self.loss,
                                                 self.global_step],
-                                                feed_dict={
-                                                    self.input: x,
-                                                    self.time: time,
-                                                    self.target: target,
-                                                    self.context: context})
+                                               feed_dict={
+                                                   self.input: x,
+                                                   self.time: time,
+                                                   self.target: target,
+                                                   self.context: context})
             cost += np.sum(loss)
 
-        if self.show: bar.finish()
+        if self.show:
+            bar.finish()
         return cost/N/self.batch_size
 
     def test(self, data, label='Test'):
@@ -158,22 +162,23 @@ class MemN2N(object):
 
         x = np.ndarray([self.batch_size, self.edim], dtype=np.float32)
         time = np.ndarray([self.batch_size, self.mem_size], dtype=np.int32)
-        target = np.zeros([self.batch_size, self.nwords]) # one-hot-encoded
+        target = np.zeros([self.batch_size, self.nwords])  # one-hot-encoded
         context = np.ndarray([self.batch_size, self.mem_size])
 
         x.fill(self.init_hid)
-        for t in xrange(self.mem_size):
-            time[:,t].fill(t)
+        for t in range(self.mem_size):
+            time[:, t].fill(t)
 
         if self.show:
             from utils import ProgressBar
             bar = ProgressBar(label, max=N)
 
         m = self.mem_size 
-        for idx in xrange(N):
-            if self.show: bar.next()
+        for idx in range(N):
+            if self.show:
+                bar.next()
             target.fill(0)
-            for b in xrange(self.batch_size):
+            for b in range(self.batch_size):
                 target[b][data[m]] = 1
                 context[b] = data[m - self.mem_size:m]
                 m += 1
@@ -187,12 +192,13 @@ class MemN2N(object):
                                                          self.context: context})
             cost += np.sum(loss)
 
-        if self.show: bar.finish()
+        if self.show:
+            bar.finish()
         return cost/N/self.batch_size
 
     def run(self, train_data, test_data):
         if not self.is_test:
-            for idx in xrange(self.nepoch):
+            for idx in range(self.nepoch):
                 train_loss = np.sum(self.train(train_data))
                 test_loss = np.sum(self.test(test_data, label='Validation'))
 
@@ -210,14 +216,15 @@ class MemN2N(object):
 
                 # Learning rate annealing
                 if len(self.log_loss) > 1 and self.log_loss[idx][1] > self.log_loss[idx-1][1] * 0.9999:
-                    self.current_lr = self.current_lr / 1.5
+                    self.current_lr /= 1.5
                     self.lr.assign(self.current_lr).eval()
-                if self.current_lr < 1e-5: break
+                if self.current_lr < 1e-5:
+                    break
 
                 if idx % 10 == 0:
                     self.saver.save(self.sess,
                                     os.path.join(self.checkpoint_dir, "MemN2N.model"),
-                                    global_step = self.step.astype(int))
+                                    global_step=self.step.astype(int))
         else:
             self.load()
 
@@ -236,5 +243,5 @@ class MemN2N(object):
         if ckpt and ckpt.model_checkpoint_path:
             self.saver.restore(self.sess, ckpt.model_checkpoint_path)
         else:
-            raise Exception(" [!] Trest mode but no checkpoint found")
+            raise Exception(" [!] Test mode but no checkpoint found")
 
